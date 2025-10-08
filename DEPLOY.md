@@ -141,17 +141,22 @@ Once deployed, test your endpoints:
      - `.python-version` file specifying 3.11.9
      - Updated requirements.txt with compatible versions
 
-2. **GEE Authentication Failed**:
+2. **Package Version Not Found**:
+   - **Error**: `Could not find a version that satisfies the requirement earthengine-api==X.X.X`
+   - **Cause**: Package version specified doesn't exist
+   - **Solution**: Updated to use latest stable version (1.6.12)
+
+3. **GEE Authentication Failed**:
    - Check that all environment variables are set correctly
    - Verify private key format (include BEGIN/END lines)
    - Ensure no extra spaces or newlines
 
-3. **Build Fails**:
+4. **Build Fails**:
    - Check requirements.txt format
    - Ensure all dependencies are compatible with Python 3.11
    - Check build logs in Render dashboard
 
-4. **App Crashes**:
+5. **App Crashes**:
    - Check application logs in Render
    - Verify model.h5 and scaler.save files are included
    - Test locally first
