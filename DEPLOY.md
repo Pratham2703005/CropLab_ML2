@@ -148,7 +148,19 @@ Once deployed, test your endpoints:
    - **Error**: `InconsistentVersionWarning: Trying to unpickle estimator StandardScaler from version 1.2.2 when using version 1.3.2`
    - **Solution**: Use exact scikit-learn version (1.2.2) that matches the scaler
 
-4. **Python Version Compatibility Error**:
+### Common Issues:
+
+1. **FastAPI + Gunicorn Compatibility Error**:
+   - **Error**: `FastAPI.__call__() missing 1 required positional argument: 'send'`
+   - **Cause**: FastAPI needs ASGI workers, not WSGI workers
+   - **Solution**: Updated Procfile and render.yaml to use `uvicorn.workers.UvicornWorker`
+
+2. **Scikit-learn Version Mismatch**:
+   - **Error**: `InconsistentVersionWarning: Trying to unpickle estimator StandardScaler from version 1.2.2 when using version 1.7.2`
+   - **Cause**: Model files were saved with older scikit-learn version
+   - **Solution**: Pinned scikit-learn==1.2.2 in requirements.txt
+
+3. **Python Version Compatibility Error**:
    - **Error**: `Cannot import 'setuptools.build_meta'` or similar build errors
    - **Cause**: Render defaults to Python 3.13, but some packages aren't compatible
    - **Solution**: The deployment is configured to use Python 3.11.9 via:
