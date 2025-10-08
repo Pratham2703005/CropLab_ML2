@@ -8,15 +8,23 @@ import joblib
 import tempfile
 import io
 import base64
+import os
 from utils.preprocess import preprocess_input
 from typing import Tuple, Optional
 import merged_processor
 from pydantic import BaseModel
 
-app = FastAPI(title="Crop Yield Prediction API")
+app = FastAPI(
+    title="Crop Yield Prediction API",
+    description="AI-powered crop yield prediction with satellite imagery and soil sensor data",
+    version="1.0.0"
+)
 
 # --- Load model and scaler with error handling ---
 import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 model = None
 scaler = None
 model_error = None
@@ -24,15 +32,38 @@ scaler_error = None
 
 try:
     model = tf.keras.models.load_model("model.h5", compile=False)
+    logger.info("✅ Model loaded successfully")
+except Exception as e:
+    model_error = str(e)
+    logger.error(f"❌ Error loading model: {e}")
 except Exception as e:
     model_error = str(e)
     logging.warning(f"Error loading model: {e}")
 
 try:
     scaler = joblib.load("scaler.save")
+    logger.info("✅ Scaler loaded successfully")
 except Exception as e:
     scaler_error = str(e)
-    logging.warning(f"Error loading scaler: {e}")
+    logger.error(f"❌ Error loading scaler: {e}")
+
+# Health check endpoint
+@app.get("/")
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for monitoring"""
+    gee_status = merged_processor.initialize_earth_engine()
+    
+    return {
+        "status": "healthy" if model and scaler and gee_status else "unhealthy",
+        "message": "Crop Yield Prediction API is running",
+        "components": {
+            "model": "loaded" if model else f"error: {model_error}",
+            "scaler": "loaded" if scaler else f"error: {scaler_error}",
+            "google_earth_engine": "connected" if gee_status else "disconnected"
+        },
+        "version": "1.0.0"
+    }
 
 # Pydantic models
 from typing import List

@@ -1,0 +1,69 @@
+# Environment variables
+.env
+.env.local
+
+# Service account file (don't commit to git)
+earth-engine-service-account.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+PIPFILE.lock
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+Lib/
+Scripts/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Model files (if too large for git)
+# model.h5
+# scaler.save
+
+# Temporary files
+*.tmp
+*.temp
+
+# Test outputs
+test_*.png
+output_*.png
+
+# Cache
+.cache/
+*.cache

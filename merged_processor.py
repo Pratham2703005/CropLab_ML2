@@ -8,6 +8,7 @@ import json
 import os
 import requests
 import pandas as pd
+import tempfile
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import logging
@@ -43,30 +44,80 @@ def initialize_earth_engine():
         except:
             pass
 
-        # Read service account file
-        if not os.path.exists(SERVICE_ACCOUNT_PATH):
-            logger.error(f"❌ Service account file not found: {SERVICE_ACCOUNT_PATH}")
-            return False
-
-        with open(SERVICE_ACCOUNT_PATH, 'r') as f:
-            service_account = json.load(f)
-
-        logger.info(f"Initializing GEE with service account: {service_account.get('client_email', 'Unknown')}")
-
-        # Use the key file path directly with ee.Initialize
-        # This is the recommended approach for service account authentication
-        ee.Initialize(ee.ServiceAccountCredentials(
-            email=service_account['client_email'],
-            key_file=SERVICE_ACCOUNT_PATH
-        ))
+        # Try environment variables first (for production/Render)
+        if os.getenv('GEE_SERVICE_ACCOUNT_EMAIL') and os.getenv('GEE_PRIVATE_KEY'):
+            logger.info("🌐 Initializing GEE with environment variables (Production mode)")
+            
+            # Create service account credentials from environment variables
+            service_account_info = {
+                "type": "service_account",
+                "project_id": os.getenv('GEE_PROJECT_ID', 'sih2k25-472714'),
+                "private_key_id": os.getenv('GEE_PRIVATE_KEY_ID'),
+                "private_key": os.getenv('GEE_PRIVATE_KEY').replace('\\n', '\n'),
+                "client_email": os.getenv('GEE_SERVICE_ACCOUNT_EMAIL'),
+                "client_id": os.getenv('GEE_CLIENT_ID'),
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+                "client_x509_cert_url": os.getenv('GEE_CLIENT_CERT_URL'),
+                "universe_domain": "googleapis.com"
+            }
+            
+            # Create a temporary file with the credentials
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
+                json.dump(service_account_info, temp_file)
+                temp_file_path = temp_file.name
+            
+            try:
+                # Initialize with temporary file
+                credentials = ee.ServiceAccountCredentials(
+                    email=service_account_info['client_email'],
+                    key_file=temp_file_path
+                )
+                ee.Initialize(credentials)
+                
+                # Test the initialization
+                test_result = ee.Number(1).getInfo()
+                if test_result == 1:
+                    logger.info("✅ Google Earth Engine initialized successfully with environment variables")
+                    return True
+                else:
+                    logger.error("❌ GEE initialization test failed")
+                    return False
+            finally:
+                # Clean up temporary file
+                try:
+                    os.unlink(temp_file_path)
+                except:
+                    pass
         
-        # Test the initialization
-        test_result = ee.Number(1).getInfo()
-        if test_result == 1:
-            logger.info("✅ Google Earth Engine initialized successfully")
-            return True
+        # Fallback to local file (for development)
+        elif os.path.exists(SERVICE_ACCOUNT_PATH):
+            logger.info("� Initializing GEE with local service account file (Development mode)")
+            
+            with open(SERVICE_ACCOUNT_PATH, 'r') as f:
+                service_account = json.load(f)
+
+            logger.info(f"Initializing GEE with service account: {service_account.get('client_email', 'Unknown')}")
+
+            # Use the key file path directly with ee.Initialize
+            ee.Initialize(ee.ServiceAccountCredentials(
+                email=service_account['client_email'],
+                key_file=SERVICE_ACCOUNT_PATH
+            ))
+            
+            # Test the initialization
+            test_result = ee.Number(1).getInfo()
+            if test_result == 1:
+                logger.info("✅ Google Earth Engine initialized successfully")
+                return True
+            else:
+                logger.error("❌ GEE initialization test failed")
+                return False
         else:
-            logger.error("❌ GEE initialization test failed")
+            logger.error("❌ No Google Earth Engine credentials found!")
+            logger.error("💡 For production: Set GEE_SERVICE_ACCOUNT_EMAIL and GEE_PRIVATE_KEY environment variables")
+            logger.error(f"💡 For development: Ensure {SERVICE_ACCOUNT_PATH} exists")
             return False
             
     except Exception as e:
@@ -83,42 +134,7 @@ def initialize_earth_engine():
             return False
         else:
             logger.error(f"❌ Failed to initialize Google Earth Engine: {e}")
-            # Try alternative initialization method
-            try:
-                logger.info("Trying alternative initialization method...")
-                # Alternative method using JSON key data directly
-                with open(SERVICE_ACCOUNT_PATH, 'r') as f:
-                    key_data = f.read()
-                
-                credentials = ee.ServiceAccountCredentials(
-                    email=service_account['client_email'],
-                    key_data=key_data
-                )
-                ee.Initialize(credentials)
-                
-                # Test the initialization
-                test_result = ee.Number(1).getInfo()
-                if test_result == 1:
-                    logger.info("✅ Google Earth Engine initialized successfully (alternative method)")
-                    return True
-                else:
-                    logger.error("❌ Alternative GEE initialization test failed")
-                    return False
-            except Exception as e2:
-                if "Invalid JWT Signature" in str(e2):
-                    logger.error(f"❌ Alternative initialization also failed: {e2}")
-                    logger.error("🕐 JWT SIGNATURE ERROR CONFIRMED!")
-                    logger.error("📋 Your system clock is not synchronized with internet time.")
-                    logger.error("💡 IMMEDIATE ACTION REQUIRED:")
-                    logger.error("   1. Right-click on Windows clock")
-                    logger.error("   2. Select 'Adjust date/time'")
-                    logger.error("   3. Enable 'Set time automatically'")
-                    logger.error("   4. Click 'Sync now'")
-                    logger.error("   5. Restart this application")
-                    return False
-                else:
-                    logger.error(f"❌ Alternative initialization also failed: {e2}")
-                    return False
+            return False
 
 async def get_district_from_coordinates(lat, lon):
     """Get district from coordinates using OpenStreetMap Nominatim API"""
