@@ -133,12 +133,22 @@ Once deployed, test your endpoints:
 
 ### Common Issues:
 
-1. **"gunicorn: command not found" Error**:
-   - **Cause**: Render tries to use gunicorn by default but we use uvicorn
-   - **Solution**: Added Procfile with `web: uvicorn app:app --host 0.0.0.0 --port $PORT`
-   - **Backup**: Also added gunicorn to requirements.txt as alternative
+1. **FastAPI + Gunicorn Compatibility Error**:
+   - **Error**: `FastAPI.__call__() missing 1 required positional argument: 'send'`
+   - **Cause**: Gunicorn uses WSGI by default, but FastAPI needs ASGI
+   - **Solution**: Updated Procfile to use uvicorn workers with gunicorn
+   - **Fix**: `web: gunicorn app:app -w 1 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT`
 
-2. **Python Version Compatibility Error**:
+2. **TensorFlow Model Loading Error**:
+   - **Error**: `Unrecognized keyword arguments: ['batch_shape']`
+   - **Cause**: Version mismatch between model (TF 2.13) and runtime (TF 2.15+)
+   - **Solution**: Use exact TensorFlow version (2.13.0) that matches the model
+
+3. **Scikit-learn Version Mismatch**:
+   - **Error**: `InconsistentVersionWarning: Trying to unpickle estimator StandardScaler from version 1.2.2 when using version 1.3.2`
+   - **Solution**: Use exact scikit-learn version (1.2.2) that matches the scaler
+
+4. **Python Version Compatibility Error**:
    - **Error**: `Cannot import 'setuptools.build_meta'` or similar build errors
    - **Cause**: Render defaults to Python 3.13, but some packages aren't compatible
    - **Solution**: The deployment is configured to use Python 3.11.9 via:
@@ -146,7 +156,7 @@ Once deployed, test your endpoints:
      - `.python-version` file specifying 3.11.9
      - Updated requirements.txt with compatible versions
 
-2. **Package Version Not Found**:
+5. **Package Version Not Found**:
    - **Error**: `Could not find a version that satisfies the requirement earthengine-api==X.X.X`
    - **Cause**: Package version specified doesn't exist
    - **Solution**: Updated to use latest stable version (1.6.12)

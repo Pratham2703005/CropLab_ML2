@@ -31,13 +31,19 @@ model_error = None
 scaler_error = None
 
 try:
-    model = tf.keras.models.load_model("model.h5", compile=False)
+    # Try loading with different compatibility options
+    try:
+        model = tf.keras.models.load_model("model.h5", compile=False)
+    except Exception as e1:
+        logger.warning(f"First load attempt failed: {e1}")
+        # Try with custom objects if needed
+        model = tf.keras.models.load_model("model.h5", compile=False, 
+                                         custom_objects=None)
     logger.info("✅ Model loaded successfully")
 except Exception as e:
     model_error = str(e)
     logger.error(f"❌ Error loading model: {e}")
-except Exception as e:
-    model_error = str(e)
+    model = None
     logging.warning(f"Error loading model: {e}")
 
 try:
