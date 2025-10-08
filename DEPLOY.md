@@ -133,17 +133,25 @@ Once deployed, test your endpoints:
 
 ### Common Issues:
 
-1. **GEE Authentication Failed**:
+1. **Python Version Compatibility Error**:
+   - **Error**: `Cannot import 'setuptools.build_meta'` or similar build errors
+   - **Cause**: Render defaults to Python 3.13, but some packages aren't compatible
+   - **Solution**: The deployment is configured to use Python 3.11.9 via:
+     - `PYTHON_VERSION=3.11.9` in render.yaml 
+     - `.python-version` file specifying 3.11.9
+     - Updated requirements.txt with compatible versions
+
+2. **GEE Authentication Failed**:
    - Check that all environment variables are set correctly
    - Verify private key format (include BEGIN/END lines)
    - Ensure no extra spaces or newlines
 
-2. **Build Fails**:
+3. **Build Fails**:
    - Check requirements.txt format
-   - Ensure all dependencies are compatible
+   - Ensure all dependencies are compatible with Python 3.11
    - Check build logs in Render dashboard
 
-3. **App Crashes**:
+4. **App Crashes**:
    - Check application logs in Render
    - Verify model.h5 and scaler.save files are included
    - Test locally first
