@@ -133,7 +133,12 @@ Once deployed, test your endpoints:
 
 ### Common Issues:
 
-1. **Python Version Compatibility Error**:
+1. **"gunicorn: command not found" Error**:
+   - **Cause**: Render tries to use gunicorn by default but we use uvicorn
+   - **Solution**: Added Procfile with `web: uvicorn app:app --host 0.0.0.0 --port $PORT`
+   - **Backup**: Also added gunicorn to requirements.txt as alternative
+
+2. **Python Version Compatibility Error**:
    - **Error**: `Cannot import 'setuptools.build_meta'` or similar build errors
    - **Cause**: Render defaults to Python 3.13, but some packages aren't compatible
    - **Solution**: The deployment is configured to use Python 3.11.9 via:

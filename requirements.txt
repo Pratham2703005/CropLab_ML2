@@ -1,5 +1,6 @@
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
+gunicorn==21.2.0
 numpy==1.26.4
 pandas==2.0.3
 tensorflow==2.15.0
