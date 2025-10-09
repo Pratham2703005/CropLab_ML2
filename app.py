@@ -39,8 +39,24 @@ logger = logging.getLogger(__name__)
 from services.singleton_service import get_singleton_service
 
 # Initialize singleton service (loads model, scaler, and GEE once)
-service = get_singleton_service()
-logger.info("🚀 Singleton service initialized")
+try:
+    service = get_singleton_service()
+    logger.info("🚀 Singleton service initialized")
+except Exception as e:
+    logger.error(f"❌ Failed to initialize singleton service: {e}")
+    # Create a mock service for basic functionality
+    service = type('MockService', (), {
+        'get_status': lambda: {
+            'model_loaded': False, 
+            'scaler_loaded': False, 
+            'gee_initialized': False,
+            'all_ready': False,
+            'errors': {'startup_error': str(e)}
+        },
+        'is_ready': lambda: False,
+        'model': None,
+        'scaler': None
+    })()
 
 # Health check endpoint
 @app.get("/")
@@ -49,16 +65,24 @@ async def health_check():
     """Health check endpoint for monitoring"""
     status = service.get_status()
     
+    startup_error = status['errors'].get('startup_error')
+    
     return {
         "status": "healthy" if service.is_ready() else "unhealthy",
         "message": "Crop Yield Prediction API is running",
         "components": {
-            "model": "loaded" if status["model_loaded"] else f"error: {status['errors']['model_error']}",
-            "scaler": "loaded" if status["scaler_loaded"] else f"error: {status['errors']['scaler_error']}",
-            "google_earth_engine": "connected" if status["gee_initialized"] else f"error: {status['errors']['gee_error']}"
+            "model": "loaded" if status["model_loaded"] else f"error: {status['errors'].get('model_error', 'Not loaded')}",
+            "scaler": "loaded" if status["scaler_loaded"] else f"error: {status['errors'].get('scaler_error', 'Not loaded')}",
+            "google_earth_engine": "connected" if status["gee_initialized"] else f"error: {status['errors'].get('gee_error', 'Not connected')}"
         },
-        "version": "1.0.0"
+        "startup_error": startup_error,
+        "ready": service.is_ready()
     }
+
+@app.get("/status")
+def health():
+    """Simple health endpoint"""
+    return service.get_status()
 
 # Pydantic models
 from typing import List
