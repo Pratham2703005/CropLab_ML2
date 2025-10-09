@@ -16,11 +16,11 @@ You need to set these environment variables in Render:
 
 ### Required Google Earth Engine Credentials:
 ```
-GEE_SERVICE_ACCOUNT_EMAIL=farm-monitoring-service@sih2k25-472714.iam.gserviceaccount.com
-GEE_PROJECT_ID=sih2k25-472714
+GEE_SERVICE_ACCOUNT_EMAIL=farm-monitoring-service@pk07007.iam.gserviceaccount.com
+GEE_PROJECT_ID=pk07007
 GEE_PRIVATE_KEY_ID=a1967074c8dfb1aa1502222cde67f755938a9a6e
 GEE_CLIENT_ID=109079035971556167013
-GEE_CLIENT_CERT_URL=https://www.googleapis.com/robot/v1/metadata/x509/farm-monitoring-service%40sih2k25-472714.iam.gserviceaccount.com
+GEE_CLIENT_CERT_URL=https://www.googleapis.com/robot/v1/metadata/x509/farm-monitoring-service%40pk07007.iam.gserviceaccount.com
 ```
 
 ### Private Key (IMPORTANT):

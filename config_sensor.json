@@ -423,15 +423,15 @@
     },
     "sensors": {
         "assets": {
-            "ECe": "projects/sih2k25-472714/assets/ECe",
-            "N": "projects/sih2k25-472714/assets/N",
-            "P": "projects/sih2k25-472714/assets/P",
-            "pH": "projects/sih2k25-472714/assets/pH",
-            "OC": "projects/sih2k25-472714/assets/OC"
+            "ECe": "projects/pk07007/assets/ECe",
+            "N": "projects/pk07007/assets/N",
+            "P": "projects/pk07007/assets/P",
+            "pH": "projects/pk07007/assets/pH",
+            "OC": "projects/pk07007/assets/OC"
         }
     },
     "geeConfig": {
         "serviceAccountPath": "./earth-engine-service-account.json",
-        "projectId": "sih2k25-472714"
+        "projectId": "pk07007"
     }
 }

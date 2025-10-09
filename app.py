@@ -2,6 +2,7 @@
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 import numpy as np
 import tensorflow as tf
 import joblib
@@ -18,6 +19,15 @@ app = FastAPI(
     title="Crop Yield Prediction API",
     description="AI-powered crop yield prediction with satellite imagery and soil sensor data",
     version="1.0.0"
+)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods including OPTIONS
+    allow_headers=["*"],  # Allows all headers
 )
 
 # --- Load model and scaler with error handling ---
@@ -206,7 +216,7 @@ async def predict(request: PredictRequest):
         import ee
         polygon = merged_processor.create_geometry_from_geojson(geojson_dict)
         yield_image = ee.Image.constant(predicted_yield).clip(polygon)
-        asset_id = f"projects/sih2k25-472714/assets/predicted_yield_{int(datetime.now().timestamp())}"
+        asset_id = f"projects/pk07007/assets/predicted_yield_{int(datetime.now().timestamp())}"
         task = ee.batch.Export.image.toAsset(
             image=yield_image,
             description='Predicted Yield',

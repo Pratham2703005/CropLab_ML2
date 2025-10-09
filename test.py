@@ -1,15 +1,29 @@
-import requests
+import ee
+import json
+import os
+import logging
 
-coordinates = [
-    [77.8746679495518, 27.364271021314064],
-    [77.9066583443935, 27.364271021314064],
-    [77.9066583443935, 27.3926781149196],
-    [77.8746679495518, 27.3926781149196],
-    [77.8746679495518, 27.364271021314064]
-]
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-response = requests.post("http://localhost:8000/predict", json={
-    "coordinates": coordinates,
-    "date": "2018-10-01"
-})
-print(response.json())
+SERVICE_ACCOUNT_PATH = 'earth-engine-service-account.json'
+
+if not os.path.exists(SERVICE_ACCOUNT_PATH):
+    logger.error(f"Service account file not found: {SERVICE_ACCOUNT_PATH}")
+    raise SystemExit(1)
+
+with open(SERVICE_ACCOUNT_PATH, 'r') as f:
+    info = json.load(f)
+
+email = info.get('client_email')
+logger.info(f"Using service account: {email}")
+
+try:
+    creds = ee.ServiceAccountCredentials(email=email, key_file=SERVICE_ACCOUNT_PATH)
+    ee.Initialize(creds)
+    res = ee.Number(1).getInfo()
+    logger.info(f"Earth Engine test result: {res}")
+    print('OK' if res == 1 else 'FAILED')
+except Exception as e:
+    logger.exception("GEE init failed")
+    print("ERROR:", e)
