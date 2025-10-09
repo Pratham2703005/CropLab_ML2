@@ -1,16 +1,24 @@
 # app.py
 
+# Configure TensorFlow for memory optimization before any imports
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Reduce TensorFlow logging
+
+import tensorflow as tf
+# Enable memory growth to prevent TensorFlow from allocating all GPU memory
+if tf.config.list_physical_devices('GPU'):
+    for gpu in tf.config.list_physical_devices('GPU'):
+        tf.config.experimental.set_memory_growth(gpu, True)
+
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import numpy as np
-import tensorflow as tf
 import joblib
 import tempfile
 import io
 import base64
 import cv2
-import os
 from utils.preprocess import preprocess_input
 from typing import Tuple, Optional
 import merged_processor

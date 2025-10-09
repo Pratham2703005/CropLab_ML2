@@ -6,8 +6,13 @@ import joblib
 import logging
 import os
 import threading
+import gc
 from typing import Optional
 import merged_processor
+
+# Configure TensorFlow for memory optimization
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Reduce TensorFlow logging
+tf.config.experimental.enable_memory_growth = True
 
 logger = logging.getLogger(__name__)
 
@@ -42,92 +47,98 @@ class SingletonService:
         self._load_scaler()
         self._initialize_gee()
         
+        # Force garbage collection after initialization to free up memory
+        gc.collect()
+        
         self._initialized = True
         logger.info("✅ SingletonService initialized successfully")
     
     def _load_model(self):
-        """Load the ML model once"""
+        """Load the ML model once with memory optimization"""
         try:
             if not os.path.exists("model.h5"):
                 raise FileNotFoundError("model.h5 not found")
                 
+            # Configure TensorFlow for lower memory usage
+            tf.config.experimental.enable_memory_growth = True
+            
             # Try loading with different compatibility options for TensorFlow version issues
             try:
-                # First attempt: Standard loading
+                # First attempt: Standard loading with memory optimization
                 self._model = tf.keras.models.load_model("model.h5", compile=False)
                 logger.info("✅ ML Model loaded successfully (standard method)")
                 
             except Exception as e1:
-                logger.warning(f"Standard load failed: {e1}")
-                
-                try:
-                    # Second attempt: With safe_mode for compatibility
-                    self._model = tf.keras.models.load_model(
-                        "model.h5", 
-                        compile=False,
-                        safe_mode=False  # Disable safe mode for compatibility
-                    )
-                    logger.info("✅ ML Model loaded successfully (safe_mode=False)")
-                    
-                except Exception as e2:
-                    logger.warning(f"Safe mode load failed: {e2}")
+                if "batch_shape" in str(e1):
+                    logger.warning(f"TensorFlow version compatibility issue with batch_shape: {e1}")
                     
                     try:
-                        # Third attempt: Load weights only and reconstruct
-                        logger.info("Attempting to load model architecture and weights separately...")
+                        # Fix batch_shape issue by modifying the model file temporarily
+                        import h5py
+                        import json
+                        import tempfile
+                        import shutil
                         
-                        # Try to load with custom objects to handle batch_shape issue
-                        import tensorflow.keras.utils as utils
+                        # Create a temporary copy of the model file
+                        with tempfile.NamedTemporaryFile(delete=False, suffix='.h5') as tmp_file:
+                            shutil.copy2("model.h5", tmp_file.name)
+                            temp_model_path = tmp_file.name
                         
-                        # Create custom InputLayer that ignores batch_shape
-                        class CompatibleInputLayer(tf.keras.layers.InputLayer):
-                            def __init__(self, **kwargs):
-                                # Remove batch_shape and use shape instead
-                                if 'batch_shape' in kwargs:
-                                    batch_shape = kwargs.pop('batch_shape')
-                                    if batch_shape and len(batch_shape) > 1:
-                                        kwargs['shape'] = batch_shape[1:]  # Remove batch dimension
-                                super().__init__(**kwargs)
-                        
-                        custom_objects = {
-                            'InputLayer': CompatibleInputLayer
-                        }
-                        
-                        self._model = tf.keras.models.load_model(
-                            "model.h5", 
-                            compile=False,
-                            custom_objects=custom_objects
-                        )
-                        logger.info("✅ ML Model loaded successfully (custom InputLayer)")
-                        
-                    except Exception as e3:
-                        logger.warning(f"Custom objects load failed: {e3}")
-                        
-                        # Fourth attempt: Create a simple fallback model for basic functionality
                         try:
-                            logger.info("Creating fallback model for basic functionality...")
-                            # Create a simple model with the expected input shape
-                            ndvi_input = tf.keras.layers.Input(shape=(315, 316, 1), name='ndvi_input')
-                            sensor_input = tf.keras.layers.Input(shape=(315, 316, 5), name='sensor_input')
+                            # Read and modify the model config to fix batch_shape
+                            with h5py.File(temp_model_path, 'r+') as f:
+                                if 'model_config' in f.attrs:
+                                    config_str = f.attrs['model_config']
+                                    if isinstance(config_str, bytes):
+                                        config_str = config_str.decode('utf-8')
+                                    
+                                    config = json.loads(config_str)
+                                    
+                                    # Fix batch_shape in config
+                                    def fix_batch_shape(layer_config):
+                                        if isinstance(layer_config, dict):
+                                            if 'config' in layer_config and 'batch_shape' in layer_config['config']:
+                                                batch_shape = layer_config['config']['batch_shape']
+                                                if batch_shape and len(batch_shape) > 1:
+                                                    layer_config['config']['shape'] = batch_shape[1:]
+                                                del layer_config['config']['batch_shape']
+                                            
+                                            for key, value in layer_config.items():
+                                                if isinstance(value, (dict, list)):
+                                                    fix_batch_shape(value)
+                                        elif isinstance(layer_config, list):
+                                            for item in layer_config:
+                                                fix_batch_shape(item)
+                                    
+                                    fix_batch_shape(config)
+                                    
+                                    # Write back the modified config
+                                    f.attrs['model_config'] = json.dumps(config).encode('utf-8')
                             
-                            # Simple concatenation and dense layers
-                            combined = tf.keras.layers.Concatenate()([ndvi_input, sensor_input])
-                            flattened = tf.keras.layers.Flatten()(combined)
-                            dense1 = tf.keras.layers.Dense(128, activation='relu')(flattened)
-                            dense2 = tf.keras.layers.Dense(64, activation='relu')(dense1)
-                            output = tf.keras.layers.Dense(1, activation='linear')(dense2)
+                            # Now try to load the modified model
+                            self._model = tf.keras.models.load_model(temp_model_path, compile=False)
+                            logger.info("✅ ML Model loaded successfully (fixed batch_shape)")
                             
-                            self._model = tf.keras.Model(inputs=[ndvi_input, sensor_input], outputs=output)
-                            logger.warning("⚠️ Using fallback model - predictions will not be accurate")
-                            
-                        except Exception as e4:
-                            logger.error(f"All model loading attempts failed. Last error: {e4}")
-                            raise e4
+                        finally:
+                            # Clean up temporary file
+                            if os.path.exists(temp_model_path):
+                                os.unlink(temp_model_path)
+                                
+                    except Exception as e2:
+                        logger.warning(f"batch_shape fix failed: {e2}")
+                        # Minimal fallback - just raise an error instead of creating heavy models
+                        raise Exception(f"Model loading failed due to TensorFlow compatibility: {e1}")
+                else:
+                    logger.warning(f"Standard load failed: {e1}")
+                    raise e1
             
         except Exception as e:
             self._model_error = str(e)
             logger.error(f"❌ Error loading model: {e}")
             self._model = None
+        finally:
+            # Clean up memory after model loading attempt
+            gc.collect()
     
     def _load_scaler(self):
         """Load the scaler once"""
