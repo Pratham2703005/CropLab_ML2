@@ -9,6 +9,7 @@ import joblib
 import tempfile
 import io
 import base64
+import cv2
 import os
 from utils.preprocess import preprocess_input
 from typing import Tuple, Optional
@@ -30,53 +31,31 @@ app.add_middleware(
     allow_headers=["*"],  # Allows all headers
 )
 
-# --- Load model and scaler with error handling ---
+# --- Initialize singleton service for model and GEE ---
 import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-model = None
-scaler = None
-model_error = None
-scaler_error = None
+from services.singleton_service import get_singleton_service
 
-try:
-    # Try loading with different compatibility options
-    try:
-        model = tf.keras.models.load_model("model.h5", compile=False)
-    except Exception as e1:
-        logger.warning(f"First load attempt failed: {e1}")
-        # Try with custom objects if needed
-        model = tf.keras.models.load_model("model.h5", compile=False, 
-                                         custom_objects=None)
-    logger.info("✅ Model loaded successfully")
-except Exception as e:
-    model_error = str(e)
-    logger.error(f"❌ Error loading model: {e}")
-    model = None
-    logging.warning(f"Error loading model: {e}")
-
-try:
-    scaler = joblib.load("scaler.save")
-    logger.info("✅ Scaler loaded successfully")
-except Exception as e:
-    scaler_error = str(e)
-    logger.error(f"❌ Error loading scaler: {e}")
+# Initialize singleton service (loads model, scaler, and GEE once)
+service = get_singleton_service()
+logger.info("🚀 Singleton service initialized")
 
 # Health check endpoint
 @app.get("/")
 @app.get("/health")
 async def health_check():
     """Health check endpoint for monitoring"""
-    gee_status = merged_processor.initialize_earth_engine()
+    status = service.get_status()
     
     return {
-        "status": "healthy" if model and scaler and gee_status else "unhealthy",
+        "status": "healthy" if service.is_ready() else "unhealthy",
         "message": "Crop Yield Prediction API is running",
         "components": {
-            "model": "loaded" if model else f"error: {model_error}",
-            "scaler": "loaded" if scaler else f"error: {scaler_error}",
-            "google_earth_engine": "connected" if gee_status else "disconnected"
+            "model": "loaded" if status["model_loaded"] else f"error: {status['errors']['model_error']}",
+            "scaler": "loaded" if status["scaler_loaded"] else f"error: {status['errors']['scaler_error']}",
+            "google_earth_engine": "connected" if status["gee_initialized"] else f"error: {status['errors']['gee_error']}"
         },
         "version": "1.0.0"
     }
@@ -97,17 +76,12 @@ class PredictRequest(BaseModel):
 
 class HeatmapRequest(BaseModel):
     coordinates: List[List[float]]  # List of [longitude, latitude] points
-    t1: float = 3.0  # Threshold for low yield
-    t2: float = 4.5  # Threshold for high yield
+    t1: float = 0.3  # Threshold for low yield
+    t2: float = 0.6  # Threshold for high yield
 
 @app.get("/health")
 def health():
-    status = {"model_loaded": model is not None, "scaler_loaded": scaler is not None}
-    if model_error:
-        status["model_error"] = model_error
-    if scaler_error:
-        status["scaler_error"] = scaler_error
-    return status
+    return service.get_status()
 
 @app.get("/")
 def root():
@@ -123,19 +97,19 @@ async def predict(request: PredictRequest):
 
     """
     # --- Check model and scaler loaded ---
-    if model is None or scaler is None:
-        msg = "Model or scaler not loaded. "
-        if model_error:
-            msg += f"Model error: {model_error}. "
-        if scaler_error:
-            msg += f"Scaler error: {scaler_error}. "
+    if not service.is_ready():
+        status = service.get_status()
+        msg = "Service not ready. "
+        if not status["model_loaded"]:
+            msg += f"Model error: {status['errors']['model_error']}. "
+        if not status["scaler_loaded"]:
+            msg += f"Scaler error: {status['errors']['scaler_error']}. "
+        if not status["gee_initialized"]:
+            msg += f"GEE error: {status['errors']['gee_error']}. "
         raise HTTPException(status_code=500, detail=msg.strip())
 
     try:
-        # --- Initialize Earth Engine ---
-        if not merged_processor.initialize_earth_engine():
-            raise HTTPException(status_code=500, detail="Failed to initialize Google Earth Engine")
-
+        # GEE is already initialized in singleton service
         # --- Get corresponding date ---
         date_str = get_corresponding_date()
         logging.info(f"Using date: {date_str}")
@@ -171,6 +145,35 @@ async def predict(request: PredictRequest):
         else:
             ndvi_processed = ndvi_data
 
+        # --- Resize NDVI data to match model expectations (315x316) ---
+        import cv2
+        
+        # Expected model input dimensions
+        expected_height, expected_width = 315, 316
+        
+        # Resize NDVI data
+        if ndvi_processed.shape[:2] != (expected_height, expected_width):
+            if ndvi_processed.ndim == 3:
+                # Resize each channel separately
+                ndvi_resized = np.zeros((expected_height, expected_width, ndvi_processed.shape[2]))
+                for i in range(ndvi_processed.shape[2]):
+                    ndvi_resized[:, :, i] = cv2.resize(
+                        ndvi_processed[:, :, i], 
+                        (expected_width, expected_height), 
+                        interpolation=cv2.INTER_LINEAR
+                    )
+                ndvi_processed = ndvi_resized
+            else:
+                ndvi_processed = cv2.resize(
+                    ndvi_processed, 
+                    (expected_width, expected_height), 
+                    interpolation=cv2.INTER_LINEAR
+                )
+                if ndvi_processed.ndim == 2:
+                    ndvi_processed = ndvi_processed[..., np.newaxis]
+        
+        logging.info(f"NDVI data resized to: {ndvi_processed.shape}")
+
         ndvi_processed = np.expand_dims(ndvi_processed, axis=0)    # (1, H, W, C)
         ndvi_processed = np.expand_dims(ndvi_processed, axis=1)    # (1, 1, H, W, C)
 
@@ -180,12 +183,36 @@ async def predict(request: PredictRequest):
         else:
             sensor_processed = sensor_data
 
+        # --- Resize sensor data to match model expectations (315x316) ---
+        # Resize sensor data
+        if sensor_processed.shape[:2] != (expected_height, expected_width):
+            if sensor_processed.ndim == 3:
+                # Resize each channel separately
+                sensor_resized = np.zeros((expected_height, expected_width, sensor_processed.shape[2]))
+                for i in range(sensor_processed.shape[2]):
+                    sensor_resized[:, :, i] = cv2.resize(
+                        sensor_processed[:, :, i], 
+                        (expected_width, expected_height), 
+                        interpolation=cv2.INTER_LINEAR
+                    )
+                sensor_processed = sensor_resized
+            else:
+                sensor_processed = cv2.resize(
+                    sensor_processed, 
+                    (expected_width, expected_height), 
+                    interpolation=cv2.INTER_LINEAR
+                )
+                if sensor_processed.ndim == 2:
+                    sensor_processed = sensor_processed[..., np.newaxis]
+        
+        logging.info(f"Sensor data resized to: {sensor_processed.shape}")
+
         sensor_processed = np.expand_dims(sensor_processed, axis=0)
         sensor_processed = np.expand_dims(sensor_processed, axis=1)
 
         # --- Align sensor channels to scaler expectations to avoid feature mismatches ---
         try:
-            expected_features = getattr(scaler, "n_features_in_", None)
+            expected_features = getattr(service.scaler, "n_features_in_", None)
             if expected_features is not None:
                 expected_features = int(expected_features)
         except Exception:
@@ -206,10 +233,10 @@ async def predict(request: PredictRequest):
                     sensor_processed = np.concatenate([sensor_processed, pad], axis=-1)
 
         # --- Preprocess inputs ---
-        ndvi_processed, sensor_processed = preprocess_input(ndvi_processed, sensor_processed, scaler)
+        ndvi_processed, sensor_processed = preprocess_input(ndvi_processed, sensor_processed, service.scaler)
 
         # --- Predict yield ---
-        prediction = model.predict([ndvi_processed, sensor_processed])
+        prediction = service.model.predict([ndvi_processed, sensor_processed])
         predicted_yield = float(prediction[0][0])  # Single yield value
 
         # --- Update GEE with predicted yield ---
@@ -246,20 +273,20 @@ async def generate_heatmap(request: HeatmapRequest):
     predicts yield using the CNN+LSTM model, and returns a color-coded
     heatmap overlay (red/yellow/green based on yield thresholds).
     """
-    # --- Check model and scaler loaded ---
-    if model is None or scaler is None:
-        msg = "Model or scaler not loaded. "
-        if model_error:
-            msg += f"Model error: {model_error}. "
-        if scaler_error:
-            msg += f"Scaler error: {scaler_error}. "
+    # --- Check service is ready ---
+    if not service.is_ready():
+        status = service.get_status()
+        msg = "Service not ready. "
+        if not status["model_loaded"]:
+            msg += f"Model error: {status['errors']['model_error']}. "
+        if not status["scaler_loaded"]:
+            msg += f"Scaler error: {status['errors']['scaler_error']}. "
+        if not status["gee_initialized"]:
+            msg += f"GEE error: {status['errors']['gee_error']}. "
         raise HTTPException(status_code=500, detail=msg.strip())
 
     try:
-        # --- Initialize Earth Engine ---
-        if not merged_processor.initialize_earth_engine():
-            raise HTTPException(status_code=500, detail="Failed to initialize Google Earth Engine")
-
+        # GEE is already initialized in singleton service
         # --- Get corresponding date ---
         date_str = get_corresponding_date()
         logging.info(f"Using date: {date_str}")
@@ -289,6 +316,35 @@ async def generate_heatmap(request: HeatmapRequest):
         else:
             ndvi_processed = ndvi_data
 
+        # --- Resize NDVI data to match model expectations (315x316) ---
+        import cv2
+        
+        # Expected model input dimensions
+        expected_height, expected_width = 315, 316
+        
+        # Resize NDVI data
+        if ndvi_processed.shape[:2] != (expected_height, expected_width):
+            if ndvi_processed.ndim == 3:
+                # Resize each channel separately
+                ndvi_resized = np.zeros((expected_height, expected_width, ndvi_processed.shape[2]))
+                for i in range(ndvi_processed.shape[2]):
+                    ndvi_resized[:, :, i] = cv2.resize(
+                        ndvi_processed[:, :, i], 
+                        (expected_width, expected_height), 
+                        interpolation=cv2.INTER_LINEAR
+                    )
+                ndvi_processed = ndvi_resized
+            else:
+                ndvi_processed = cv2.resize(
+                    ndvi_processed, 
+                    (expected_width, expected_height), 
+                    interpolation=cv2.INTER_LINEAR
+                )
+                if ndvi_processed.ndim == 2:
+                    ndvi_processed = ndvi_processed[..., np.newaxis]
+        
+        logging.info(f"NDVI data resized to: {ndvi_processed.shape}")
+
         ndvi_processed = np.expand_dims(ndvi_processed, axis=0)    # (1, H, W, C)
         ndvi_processed = np.expand_dims(ndvi_processed, axis=1)    # (1, 1, H, W, C)
 
@@ -298,12 +354,36 @@ async def generate_heatmap(request: HeatmapRequest):
         else:
             sensor_processed = sensor_data
 
+        # --- Resize sensor data to match model expectations (315x316) ---
+        # Resize sensor data
+        if sensor_processed.shape[:2] != (expected_height, expected_width):
+            if sensor_processed.ndim == 3:
+                # Resize each channel separately
+                sensor_resized = np.zeros((expected_height, expected_width, sensor_processed.shape[2]))
+                for i in range(sensor_processed.shape[2]):
+                    sensor_resized[:, :, i] = cv2.resize(
+                        sensor_processed[:, :, i], 
+                        (expected_width, expected_height), 
+                        interpolation=cv2.INTER_LINEAR
+                    )
+                sensor_processed = sensor_resized
+            else:
+                sensor_processed = cv2.resize(
+                    sensor_processed, 
+                    (expected_width, expected_height), 
+                    interpolation=cv2.INTER_LINEAR
+                )
+                if sensor_processed.ndim == 2:
+                    sensor_processed = sensor_processed[..., np.newaxis]
+        
+        logging.info(f"Sensor data resized to: {sensor_processed.shape}")
+
         sensor_processed = np.expand_dims(sensor_processed, axis=0)
         sensor_processed = np.expand_dims(sensor_processed, axis=1)
 
         # --- Align sensor channels to scaler expectations to avoid feature mismatches ---
         try:
-            expected_features = getattr(scaler, "n_features_in_", None)
+            expected_features = getattr(service.scaler, "n_features_in_", None)
             if expected_features is not None:
                 expected_features = int(expected_features)
         except Exception:
@@ -324,10 +404,10 @@ async def generate_heatmap(request: HeatmapRequest):
                     sensor_processed = np.concatenate([sensor_processed, pad], axis=-1)
 
         # --- Preprocess inputs ---
-        ndvi_processed, sensor_processed = preprocess_input(ndvi_processed, sensor_processed, scaler)
+        ndvi_processed, sensor_processed = preprocess_input(ndvi_processed, sensor_processed, service.scaler)
 
         # --- Predict yield ---
-        prediction = model.predict([ndvi_processed, sensor_processed])[0][0]
+        prediction = service.model.predict([ndvi_processed, sensor_processed])[0][0]
         predicted_yield = float(prediction)
 
         # --- Apply yield comparison and NDVI adjustment directly ---
