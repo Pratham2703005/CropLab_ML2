@@ -87,15 +87,40 @@ class SingletonService:
                                     if isinstance(config_str, bytes):
                                         config_str = config_str.decode('utf-8')
                                     config = json.loads(config_str)
-                                    # Recursively remove/convert all batch_shape keys
+                                    # Recursively convert/remove batch_shape and shape keys to be compatible
+                                    # with older Keras/TensorFlow deserializers which expect
+                                    # 'batch_input_shape' for InputLayer instead of 'batch_shape' or 'shape'.
                                     def fix_all_batch_shape(obj):
                                         if isinstance(obj, dict):
+                                            # If config directly contains 'batch_shape', convert it
                                             if 'batch_shape' in obj:
-                                                batch_shape = obj['batch_shape']
-                                                if batch_shape and isinstance(batch_shape, list) and len(batch_shape) > 1:
-                                                    obj['shape'] = batch_shape[1:]
-                                                del obj['batch_shape']
-                                            for k, v in obj.items():
+                                                batch_shape = obj.get('batch_shape')
+                                                try:
+                                                    if batch_shape and isinstance(batch_shape, (list, tuple)) and len(batch_shape) > 1:
+                                                        # Drop the leading None and set batch_input_shape
+                                                        obj['batch_input_shape'] = batch_shape[1:]
+                                                except Exception:
+                                                    pass
+                                                # Remove the original key
+                                                obj.pop('batch_shape', None)
+                                                # Remove 'shape' if it exists to avoid conflicts during deserialization
+                                                obj.pop('shape', None)
+
+                                            # Some configs nest layer config under 'config'
+                                            if 'config' in obj and isinstance(obj['config'], dict):
+                                                cfg = obj['config']
+                                                if 'batch_shape' in cfg:
+                                                    batch_shape = cfg.get('batch_shape')
+                                                    try:
+                                                        if batch_shape and isinstance(batch_shape, (list, tuple)) and len(batch_shape) > 1:
+                                                            cfg['batch_input_shape'] = batch_shape[1:]
+                                                    except Exception:
+                                                        pass
+                                                    cfg.pop('batch_shape', None)
+                                                    cfg.pop('shape', None)
+
+                                            # Recurse into all values
+                                            for k, v in list(obj.items()):
                                                 fix_all_batch_shape(v)
                                         elif isinstance(obj, list):
                                             for item in obj:
