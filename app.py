@@ -207,7 +207,7 @@ async def predict(request: PredictRequest):
         logging.info(f"NDVI data resized to: {ndvi_processed.shape}")
 
         ndvi_processed = np.expand_dims(ndvi_processed, axis=0)    # (1, H, W, C)
-        ndvi_processed = np.expand_dims(ndvi_processed, axis=1)    # (1, 1, H, W, C)
+        # Removed axis=1 expand_dims - causes shape mismatch
 
         # Sensor preprocessing
         if sensor_data.ndim == 2:
@@ -240,7 +240,7 @@ async def predict(request: PredictRequest):
         logging.info(f"Sensor data resized to: {sensor_processed.shape}")
 
         sensor_processed = np.expand_dims(sensor_processed, axis=0)
-        sensor_processed = np.expand_dims(sensor_processed, axis=1)
+        # Removed axis=1 expand_dims - causes shape mismatch
 
         # --- Align sensor channels to scaler expectations to avoid feature mismatches ---
         try:
@@ -378,7 +378,7 @@ async def generate_heatmap(request: HeatmapRequest):
         logging.info(f"NDVI data resized to: {ndvi_processed.shape}")
 
         ndvi_processed = np.expand_dims(ndvi_processed, axis=0)    # (1, H, W, C)
-        ndvi_processed = np.expand_dims(ndvi_processed, axis=1)    # (1, 1, H, W, C)
+        # Removed axis=1 expand_dims - causes shape mismatch
 
         # Sensor preprocessing
         if sensor_data.ndim == 2:
@@ -411,7 +411,7 @@ async def generate_heatmap(request: HeatmapRequest):
         logging.info(f"Sensor data resized to: {sensor_processed.shape}")
 
         sensor_processed = np.expand_dims(sensor_processed, axis=0)
-        sensor_processed = np.expand_dims(sensor_processed, axis=1)
+        # Removed axis=1 expand_dims - causes shape mismatch
 
         # --- Align sensor channels to scaler expectations to avoid feature mismatches ---
         try:
