@@ -483,6 +483,7 @@ async def generate_heatmap(request: HeatmapRequest):
             logging.warning("Could not get district information, using original NDVI data")
 
         # --- Generate separate heatmap masks ---
+        # Note: create_separate_yield_masks returns 4 values: red_mask, yellow_mask, green_mask, pixel_counts
         red_mask, yellow_mask, green_mask, pixel_counts = merged_processor.create_separate_yield_masks(
             final_ndvi_data, predicted_yield, request.t1, request.t2
         )
