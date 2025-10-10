@@ -71,71 +71,58 @@ class SingletonService:
                 if "batch_shape" in str(e1):
                     logger.warning(f"TensorFlow version compatibility issue with batch_shape: {e1}")
                     try:
-                        import h5py
-                        import json
-                        import tempfile
-                        import shutil
-                        # Create a temporary copy of the model file
-                        with tempfile.NamedTemporaryFile(delete=False, suffix='.h5') as tmp_file:
-                            shutil.copy2("model.h5", tmp_file.name)
-                            temp_model_path = tmp_file.name
-                        try:
-                            # Read and modify the model config to robustly fix all batch_shape keys
-                            with h5py.File(temp_model_path, 'r+') as f:
-                                if 'model_config' in f.attrs:
-                                    config_str = f.attrs['model_config']
-                                    if isinstance(config_str, bytes):
-                                        config_str = config_str.decode('utf-8')
-                                    config = json.loads(config_str)
-                                    # Recursively convert/remove batch_shape and shape keys to be compatible
-                                    # with older Keras/TensorFlow deserializers which expect
-                                    # 'batch_input_shape' for InputLayer instead of 'batch_shape' or 'shape'.
-                                    def fix_all_batch_shape(obj):
-                                        if isinstance(obj, dict):
-                                            # If config directly contains 'batch_shape', convert it
-                                            if 'batch_shape' in obj:
-                                                batch_shape = obj.get('batch_shape')
-                                                try:
-                                                    if batch_shape and isinstance(batch_shape, (list, tuple)) and len(batch_shape) > 1:
-                                                        # Drop the leading None and set batch_input_shape
-                                                        obj['batch_input_shape'] = batch_shape[1:]
-                                                except Exception:
-                                                    pass
-                                                # Remove the original key
-                                                obj.pop('batch_shape', None)
-                                                # Remove 'shape' if it exists to avoid conflicts during deserialization
-                                                obj.pop('shape', None)
-
-                                            # Some configs nest layer config under 'config'
-                                            if 'config' in obj and isinstance(obj['config'], dict):
-                                                cfg = obj['config']
-                                                if 'batch_shape' in cfg:
-                                                    batch_shape = cfg.get('batch_shape')
-                                                    try:
-                                                        if batch_shape and isinstance(batch_shape, (list, tuple)) and len(batch_shape) > 1:
-                                                            cfg['batch_input_shape'] = batch_shape[1:]
-                                                    except Exception:
-                                                        pass
-                                                    cfg.pop('batch_shape', None)
-                                                    cfg.pop('shape', None)
-
-                                            # Recurse into all values
-                                            for k, v in list(obj.items()):
-                                                fix_all_batch_shape(v)
-                                        elif isinstance(obj, list):
-                                            for item in obj:
-                                                fix_all_batch_shape(item)
-                                    fix_all_batch_shape(config)
-                                    f.attrs['model_config'] = json.dumps(config).encode('utf-8')
-                            # Now try to load the modified model
-                            self._model = tf.keras.models.load_model(temp_model_path, compile=False)
-                            logger.info("✅ ML Model loaded successfully (all batch_shape keys fixed)")
-                        finally:
-                            if os.path.exists(temp_model_path):
-                                os.unlink(temp_model_path)
+                        # Create a custom InputLayer that handles batch_shape compatibility
+                        class CompatibleInputLayer(tf.keras.layers.InputLayer):
+                            def __init__(self, batch_shape=None, **kwargs):
+                                # Convert batch_shape to input_shape for compatibility
+                                if batch_shape is not None:
+                                    if isinstance(batch_shape, (list, tuple)) and len(batch_shape) > 1:
+                                        kwargs['input_shape'] = batch_shape[1:]  # Remove batch dimension
+                                    kwargs.pop('batch_shape', None)  # Remove batch_shape from kwargs
+                                super().__init__(**kwargs)
+                        
+                        # Try loading with custom objects
+                        custom_objects = {
+                            'InputLayer': CompatibleInputLayer
+                        }
+                        
+                        self._model = tf.keras.models.load_model(
+                            "model.h5", 
+                            compile=False,
+                            custom_objects=custom_objects
+                        )
+                        logger.info("✅ ML Model loaded successfully (custom InputLayer with batch_shape fix)")
+                        
                     except Exception as e2:
-                        logger.warning(f"batch_shape fix failed: {e2}")
-                        raise Exception(f"Model loading failed due to TensorFlow compatibility: {e1}")
+                        logger.warning(f"Custom InputLayer fix failed: {e2}")
+                        try:
+                            # Alternative approach: Load model with safe mode disabled
+                            import tensorflow.keras.utils as utils
+                            
+                            # Register custom deserializer for InputLayer
+                            def custom_input_layer_deserializer(config, custom_objects=None, **kwargs):
+                                # Fix batch_shape in config before creating layer
+                                if 'batch_shape' in config:
+                                    batch_shape = config.pop('batch_shape')
+                                    if batch_shape and len(batch_shape) > 1:
+                                        config['input_shape'] = batch_shape[1:]
+                                return tf.keras.layers.InputLayer.from_config(config)
+                            
+                            # Custom objects with our deserializer
+                            custom_objects = {
+                                'InputLayer': custom_input_layer_deserializer
+                            }
+                            
+                            self._model = tf.keras.models.load_model(
+                                "model.h5", 
+                                compile=False,
+                                custom_objects=custom_objects
+                            )
+                            logger.info("✅ ML Model loaded successfully (custom deserializer)")
+                            
+                        except Exception as e3:
+                            logger.error(f"All batch_shape fixes failed: {e3}")
+                            raise Exception(f"Model loading failed due to TensorFlow compatibility: {e1}")
                 else:
                     logger.warning(f"Standard load failed: {e1}")
                     raise e1
