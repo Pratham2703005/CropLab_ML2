@@ -67,66 +67,49 @@ class SingletonService:
                 # First attempt: Standard loading with memory optimization
                 self._model = tf.keras.models.load_model("model.h5", compile=False)
                 logger.info("✅ ML Model loaded successfully (standard method)")
-                
             except Exception as e1:
                 if "batch_shape" in str(e1):
                     logger.warning(f"TensorFlow version compatibility issue with batch_shape: {e1}")
-                    
                     try:
-                        # Fix batch_shape issue by modifying the model file temporarily
                         import h5py
                         import json
                         import tempfile
                         import shutil
-                        
                         # Create a temporary copy of the model file
                         with tempfile.NamedTemporaryFile(delete=False, suffix='.h5') as tmp_file:
                             shutil.copy2("model.h5", tmp_file.name)
                             temp_model_path = tmp_file.name
-                        
                         try:
-                            # Read and modify the model config to fix batch_shape
+                            # Read and modify the model config to robustly fix all batch_shape keys
                             with h5py.File(temp_model_path, 'r+') as f:
                                 if 'model_config' in f.attrs:
                                     config_str = f.attrs['model_config']
                                     if isinstance(config_str, bytes):
                                         config_str = config_str.decode('utf-8')
-                                    
                                     config = json.loads(config_str)
-                                    
-                                    # Fix batch_shape in config
-                                    def fix_batch_shape(layer_config):
-                                        if isinstance(layer_config, dict):
-                                            if 'config' in layer_config and 'batch_shape' in layer_config['config']:
-                                                batch_shape = layer_config['config']['batch_shape']
-                                                if batch_shape and len(batch_shape) > 1:
-                                                    layer_config['config']['shape'] = batch_shape[1:]
-                                                del layer_config['config']['batch_shape']
-                                            
-                                            for key, value in layer_config.items():
-                                                if isinstance(value, (dict, list)):
-                                                    fix_batch_shape(value)
-                                        elif isinstance(layer_config, list):
-                                            for item in layer_config:
-                                                fix_batch_shape(item)
-                                    
-                                    fix_batch_shape(config)
-                                    
-                                    # Write back the modified config
+                                    # Recursively remove/convert all batch_shape keys
+                                    def fix_all_batch_shape(obj):
+                                        if isinstance(obj, dict):
+                                            if 'batch_shape' in obj:
+                                                batch_shape = obj['batch_shape']
+                                                if batch_shape and isinstance(batch_shape, list) and len(batch_shape) > 1:
+                                                    obj['shape'] = batch_shape[1:]
+                                                del obj['batch_shape']
+                                            for k, v in obj.items():
+                                                fix_all_batch_shape(v)
+                                        elif isinstance(obj, list):
+                                            for item in obj:
+                                                fix_all_batch_shape(item)
+                                    fix_all_batch_shape(config)
                                     f.attrs['model_config'] = json.dumps(config).encode('utf-8')
-                            
                             # Now try to load the modified model
                             self._model = tf.keras.models.load_model(temp_model_path, compile=False)
-                            logger.info("✅ ML Model loaded successfully (fixed batch_shape)")
-                            
+                            logger.info("✅ ML Model loaded successfully (all batch_shape keys fixed)")
                         finally:
-                            # Clean up temporary file
                             if os.path.exists(temp_model_path):
                                 os.unlink(temp_model_path)
-                                
                     except Exception as e2:
                         logger.warning(f"batch_shape fix failed: {e2}")
-                        # Minimal fallback - just raise an error instead of creating heavy models
                         raise Exception(f"Model loading failed due to TensorFlow compatibility: {e1}")
                 else:
                     logger.warning(f"Standard load failed: {e1}")
