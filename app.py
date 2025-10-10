@@ -264,12 +264,26 @@ async def predict(request: PredictRequest):
                     pad = np.zeros(tuple(pad_shape), dtype=sensor_processed.dtype)
                     sensor_processed = np.concatenate([sensor_processed, pad], axis=-1)
 
-        # --- Preprocess inputs ---
-        ndvi_processed, sensor_processed = preprocess_input(ndvi_processed, sensor_processed, service.scaler)
+        # --- Preprocess inputs with error handling ---
+        try:
+            ndvi_processed, sensor_processed = preprocess_input(ndvi_processed, sensor_processed, service.scaler)
+        except Exception as preprocess_error:
+            logging.error(f"Preprocessing error: {preprocess_error}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Data preprocessing failed: {str(preprocess_error)}. NDVI shape: {ndvi_processed.shape}, Sensor shape: {sensor_processed.shape}"
+            )
 
-        # --- Predict yield ---
-        prediction = service.model.predict([ndvi_processed, sensor_processed])
-        predicted_yield = float(prediction[0][0])  # Single yield value
+        # --- Predict yield with error handling ---
+        try:
+            prediction = service.model.predict([ndvi_processed, sensor_processed])
+            predicted_yield = float(prediction[0][0])  # Single yield value
+        except Exception as prediction_error:
+            logging.error(f"Model prediction error: {prediction_error}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Model prediction failed: {str(prediction_error)}. Check input shapes and model compatibility."
+            )
 
         # --- Update GEE with predicted yield ---
         import ee
@@ -435,12 +449,26 @@ async def generate_heatmap(request: HeatmapRequest):
                     pad = np.zeros(tuple(pad_shape), dtype=sensor_processed.dtype)
                     sensor_processed = np.concatenate([sensor_processed, pad], axis=-1)
 
-        # --- Preprocess inputs ---
-        ndvi_processed, sensor_processed = preprocess_input(ndvi_processed, sensor_processed, service.scaler)
+        # --- Preprocess inputs with error handling ---
+        try:
+            ndvi_processed, sensor_processed = preprocess_input(ndvi_processed, sensor_processed, service.scaler)
+        except Exception as preprocess_error:
+            logging.error(f"Preprocessing error: {preprocess_error}")
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Data preprocessing failed: {str(preprocess_error)}. NDVI shape: {ndvi_processed.shape}, Sensor shape: {sensor_processed.shape}"
+            )
 
-        # --- Predict yield ---
-        prediction = service.model.predict([ndvi_processed, sensor_processed])[0][0]
-        predicted_yield = float(prediction)
+        # --- Predict yield with error handling ---
+        try:
+            prediction = service.model.predict([ndvi_processed, sensor_processed])[0][0]
+            predicted_yield = float(prediction)
+        except Exception as prediction_error:
+            logging.error(f"Model prediction error: {prediction_error}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Model prediction failed: {str(prediction_error)}. Check input shapes and model compatibility."
+            )
 
         # --- Apply yield comparison and NDVI adjustment directly ---
         # Get district and old yield for comparison
